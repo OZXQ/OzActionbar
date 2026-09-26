@@ -1,0 +1,18 @@
+## Interface: 11200
+## Title: OzActionbar
+## Notes: Lightweight centered action bar for WoW 1.12.1.
+## Title-zhCN: |cff00eeffOzActionbar|r 动作条居中与美化
+## Notes-zhCN: 动作条居中、去除狮鹫、距离染色、触发高亮及自适应布局
+## Author: Oz
+## Version: 1.0.0
+## SavedVariables: OzActionbarDB
+
+lib\lib.lua
+lib\libhook.lua
+OzActionbar.lua
+actionbar.lua
+gryphon.lua
+bags.lua
+microbar.lua
+xpbar.lua
+repbar.lua
