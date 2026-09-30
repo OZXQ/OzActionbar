@@ -1,7 +1,15 @@
 if OzAb and OzAb.repbar then return end
 OzAb = OzAb or {}
-local _, class = UnitClass 'player'
-local colour = (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]) or { r = 0, g = 0.6, b = 1 }
+local function get_bar_color(standing)
+    if standing and FACTION_BAR_COLORS and FACTION_BAR_COLORS[standing] then
+        return FACTION_BAR_COLORS[standing]
+    end
+    local _, englishClass = UnitClass("player")
+    if englishClass and RAID_CLASS_COLORS and RAID_CLASS_COLORS[englishClass] then
+        return RAID_CLASS_COLORS[englishClass]
+    end
+    return { r = 0, g = 0.6, b = 1 }
+end
 
 local repbar = {}
 OzAb.repbar = repbar
@@ -45,7 +53,11 @@ function repbar:reposition()
     isRepositioning = true
     ReputationWatchBar:SetParent(UIParent)
     ReputationWatchBar:ClearAllPoints()
-    if MainMenuExpBar and MainMenuExpBar:IsShown() and UnitLevel("player") < (MAX_PLAYER_LEVEL or 60) then
+
+    local playerlevel = UnitLevel("player") or 0
+    local maxLevel = MAX_PLAYER_LEVEL or 60
+
+    if playerlevel > 0 and playerlevel < maxLevel and MainMenuExpBar and MainMenuExpBar:IsShown() then
         ReputationWatchBar:SetPoint("BOTTOM", MainMenuExpBar, "TOP", 0, 0)
     else
         ReputationWatchBar:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 0)
@@ -71,12 +83,13 @@ function repbar:replaceTexture()
     ReputationWatchStatusBar:SetBackdropColor(0, 0, 0, 0.6)
 
     if not ReputationWatchStatusBar.spark then
+        local c = get_bar_color()
         ReputationWatchStatusBar.spark = ReputationWatchStatusBar:CreateTexture(nil, 'OVERLAY', nil, 7)
         ReputationWatchStatusBar.spark:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
         ReputationWatchStatusBar.spark:SetWidth(35)
         ReputationWatchStatusBar.spark:SetHeight(35)
         ReputationWatchStatusBar.spark:SetBlendMode("ADD")
-        ReputationWatchStatusBar.spark:SetVertexColor(colour.r * 1.3, colour.g * 1.3, colour.b * 1.3, 0.6)
+        ReputationWatchStatusBar.spark:SetVertexColor(c.r * 1.3, c.g * 1.3, c.b * 1.3, 0.6)
     end
 
     -- Permanently hide default Blizzard quad art textures
@@ -116,14 +129,22 @@ function repbar:replaceTexture()
     if ReputationWatchStatusBarText then
         ReputationWatchStatusBarText:SetText("")
     end
+
+    -- Permanently silence max level bar frames if present
+    if MainMenuBarMaxLevelBar then
+        MainMenuBarMaxLevelBar:Hide()
+        MainMenuBarMaxLevelBar.Show = function() end
+        MainMenuBarMaxLevelBar:SetAlpha(0)
+    end
 end
 
 function repbar:createText()
     if self.repstring then return end
 
-    local textFrame = CreateFrame("Frame", "OzRepTextFrame", ReputationWatchBar)
-    textFrame:SetAllPoints(ReputationWatchBar)
+    local textFrame = CreateFrame("Frame", "OzRepTextFrame", ReputationWatchStatusBar)
+    textFrame:SetAllPoints(ReputationWatchStatusBar)
     textFrame:SetFrameStrata("HIGH")
+    textFrame:SetFrameLevel(ReputationWatchStatusBar:GetFrameLevel() + 5)
 
     local font = STANDARD_TEXT_FONT
     local size, outline = 10, "OUTLINE"
@@ -143,9 +164,10 @@ end
 function repbar:setupMouse()
     if self.mouseFrame then return end
 
-    local mouseFrame = CreateFrame("Frame", "OzRepMouseFrame", ReputationWatchBar)
-    mouseFrame:SetAllPoints(ReputationWatchBar)
+    local mouseFrame = CreateFrame("Frame", "OzRepMouseFrame", ReputationWatchStatusBar)
+    mouseFrame:SetAllPoints(ReputationWatchStatusBar)
     mouseFrame:SetFrameStrata("HIGH")
+    mouseFrame:SetFrameLevel(ReputationWatchStatusBar:GetFrameLevel() + 6)
     mouseFrame:EnableMouse(true)
     mouseFrame:SetScript("OnEnter", function()
         repbar:updateRep()
@@ -170,8 +192,12 @@ function repbar:updateRep()
         local standingName = _G["FACTION_STANDING_LABEL" .. standing] or repvalues_fallback[standing] or ""
 
         if self.repstring then
-            self.repstring:SetText(name ..
-                " (" .. standingName .. ") " .. percent .. "% - " .. remStr .. " " .. L_REMAINING)
+            self.repstring:SetText(
+                "|cffffd200" .. name .. "|r " ..
+                "|cffffffff(" .. standingName .. ")|r " ..
+                "|cff00ff00" .. percent .. "%|r " ..
+                "|cffffffff-|r |cffffffff" .. remStr .. " " .. L_REMAINING .. "|r"
+            )
             self.repstring:Show()
         end
     else
@@ -249,12 +275,15 @@ function repbar:enable()
             end
         end
 
+        local barColor = get_bar_color(standing)
+
         if min and max and max > min and v then
             ReputationWatchStatusBar:SetMinMaxValues(min, max)
             ReputationWatchStatusBar:SetValue(v)
             local x = ((v - min) / (max - min)) * ReputationWatchBar:GetWidth()
             if ReputationWatchStatusBar.spark then
                 ReputationWatchStatusBar.spark:SetPoint('CENTER', ReputationWatchStatusBar, 'LEFT', x, 0)
+                ReputationWatchStatusBar.spark:SetVertexColor(barColor.r * 1.3, barColor.g * 1.3, barColor.b * 1.3, 0.8)
                 ReputationWatchStatusBar.spark:Show()
             end
         else
@@ -263,7 +292,10 @@ function repbar:enable()
             end
         end
 
-        ReputationWatchStatusBar:SetStatusBarColor(colour.r, colour.g, colour.b, 1)
+        ReputationWatchStatusBar:SetStatusBarColor(barColor.r, barColor.g, barColor.b, 1)
+        if repbar.textFrame and ReputationWatchStatusBar then
+            repbar.textFrame:SetFrameLevel(ReputationWatchStatusBar:GetFrameLevel() + 5)
+        end
         repbar:updateRep()
     end
 
@@ -278,13 +310,49 @@ function repbar:enable()
         self.frame = CreateFrame("Frame")
         self.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
         self.frame:RegisterEvent("UPDATE_FACTION")
+
+        local retryTimer = 0
+        local totalWait = 0
         self.frame:SetScript("OnEvent", function()
-            if ReputationWatchBar_Update then
-                ReputationWatchBar_Update()
+            if event == "PLAYER_ENTERING_WORLD" then
+                if ReputationWatchBar_Update then
+                    ReputationWatchBar_Update()
+                end
+                repbar:resize()
+                repbar:reposition()
+                repbar:updateRep()
+
+                local name = GetWatchedFactionInfo()
+                if not name then
+                    retryTimer = 0
+                    totalWait = 0
+                    repbar.frame:SetScript("OnUpdate", function()
+                        local dt = arg1 or 0.1
+                        retryTimer = retryTimer + dt
+                        totalWait = totalWait + dt
+                        if retryTimer >= 0.3 then
+                            retryTimer = 0
+                            local tracked = GetWatchedFactionInfo()
+                            if tracked or totalWait >= 5 then
+                                repbar.frame:SetScript("OnUpdate", nil)
+                                if ReputationWatchBar_Update then
+                                    ReputationWatchBar_Update()
+                                end
+                                repbar:resize()
+                                repbar:reposition()
+                                repbar:updateRep()
+                            end
+                        end
+                    end)
+                end
+            elseif event == "UPDATE_FACTION" then
+                if ReputationWatchBar_Update then
+                    ReputationWatchBar_Update()
+                end
+                repbar:resize()
+                repbar:reposition()
+                repbar:updateRep()
             end
-            repbar:resize()
-            repbar:reposition()
-            repbar:updateRep()
         end)
     end
 

@@ -27,6 +27,10 @@ function xpbar:reposition()
     MainMenuExpBar:SetWidth(self.width)
     MainMenuExpBar:SetHeight(self.height)
     isRepositioning = false
+
+    if OzAb.repbar and OzAb.repbar.reposition then
+        OzAb.repbar:reposition()
+    end
 end
 
 function xpbar:resize()
@@ -123,6 +127,10 @@ function xpbar:updateExp()
     local playerlevel = UnitLevel("player")
     local maxLevel = MAX_PLAYER_LEVEL or 60
 
+    if not playerlevel or playerlevel == 0 then
+        return
+    end
+
     if playerlevel >= maxLevel then
         MainMenuExpBar:Hide()
         if self.expstring then self.expstring:SetText("") end
@@ -132,6 +140,8 @@ function xpbar:updateExp()
         end
         return
     end
+
+    MainMenuExpBar:Show()
 
     local xp = UnitXP("player")
     local xpmax = UnitXPMax("player")
@@ -176,6 +186,10 @@ function xpbar:updateExp()
             MainMenuExpBar.spark:Show()
         end
     end
+
+    if OzAb.repbar and OzAb.repbar.reposition then
+        OzAb.repbar:reposition()
+    end
 end
 
 function xpbar:enable()
@@ -217,7 +231,16 @@ function xpbar:enable()
     MainMenuExpBar_SetWidth = function(width)
         MainMenuExpBar:SetWidth(xpbar.width)
         MainMenuExpBar.pauseUpdates = nil
-        MainMenuExpBar_Update()
+        if MainMenuExpBar_Update then
+            MainMenuExpBar_Update()
+        else
+            xpbar:updateExp()
+        end
+    end
+
+    -- Override Blizzard's MainMenuBar_UpdateExperienceBars so Blizzard doesn't override our bars
+    MainMenuBar_UpdateExperienceBars = function(newLevel)
+        xpbar:updateExp()
     end
 
     self:updateExp()
@@ -229,6 +252,9 @@ function xpbar:enable()
     self.frame:RegisterEvent("UPDATE_EXHAUSTION")
     self.frame:RegisterEvent("PLAYER_LEVEL_UP")
     self.frame:RegisterEvent("PLAYER_UPDATE_RESTING")
+
+    local loginTimer = 0
+    local totalLoginWait = 0
     self.frame:SetScript("OnEvent", function()
         if event == "PLAYER_ENTERING_WORLD" then
             if MainMenuBarOverlayFrame then
@@ -238,7 +264,28 @@ function xpbar:enable()
                 MainMenuBarExpText:SetText("")
             end
             xpbar:reposition()
+            xpbar:updateExp()
+
+            if not UnitLevel("player") or UnitLevel("player") == 0 then
+                loginTimer = 0
+                totalLoginWait = 0
+                xpbar.frame:SetScript("OnUpdate", function()
+                    local dt = arg1 or 0.1
+                    loginTimer = loginTimer + dt
+                    totalLoginWait = totalLoginWait + dt
+                    if loginTimer >= 0.2 then
+                        loginTimer = 0
+                        local lvl = UnitLevel("player")
+                        if (lvl and lvl > 0) or totalLoginWait >= 5 then
+                            xpbar.frame:SetScript("OnUpdate", nil)
+                            xpbar:reposition()
+                            xpbar:updateExp()
+                        end
+                    end
+                end)
+            end
+        else
+            xpbar:updateExp()
         end
-        xpbar:updateExp()
     end)
 end

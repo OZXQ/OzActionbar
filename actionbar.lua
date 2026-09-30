@@ -73,7 +73,11 @@ end
 function actionbar:resize()
   local totalWidth = 12 * self.normalButtonSize + 11 * self.buttonPadding
   if MainMenuBar then MainMenuBar:SetWidth(totalWidth) end
-  if MainMenuBarMaxLevelBar then MainMenuBarMaxLevelBar:SetWidth(totalWidth) end
+  if MainMenuBarMaxLevelBar then
+    MainMenuBarMaxLevelBar:Hide()
+    MainMenuBarMaxLevelBar.Show = function() end
+    MainMenuBarMaxLevelBar:SetAlpha(0)
+  end
 end
 
 function actionbar:centerAndSize()
@@ -155,7 +159,11 @@ function actionbar:removeTextures()
     for i = 0, 3 do
       local tex = _G[prefix .. i]
       if tex then
-        tex:SetTexture(""); tex:Hide()
+        tex:SetTexture("")
+        tex:SetAlpha(0)
+        tex:Hide()
+        tex.Show = function() end
+        tex.SetTexture = function() end
       end
     end
   end
@@ -168,8 +176,33 @@ function actionbar:removeTextures()
   }
   for _, tex in ipairs(staticTextures) do
     if tex then
-      tex:SetTexture(""); tex:Hide()
+      tex:SetTexture("")
+      tex:SetAlpha(0)
+      tex:Hide()
+      tex.Show = function() end
+      tex.SetTexture = function() end
     end
+  end
+
+  -- Silence any texture regions belonging to ShapeshiftBarFrame
+  if ShapeshiftBarFrame and ShapeshiftBarFrame.GetRegions then
+    local regions = { ShapeshiftBarFrame:GetRegions() }
+    for _, reg in ipairs(regions) do
+      if reg and reg.GetObjectType and reg:GetObjectType() == "Texture" then
+        reg:SetTexture("")
+        reg:SetAlpha(0)
+        reg:Hide()
+        reg.Show = function() end
+        reg.SetTexture = function() end
+      end
+    end
+  end
+
+  -- Permanently hide MainMenuBarMaxLevelBar frame
+  if MainMenuBarMaxLevelBar then
+    MainMenuBarMaxLevelBar:Hide()
+    MainMenuBarMaxLevelBar.Show = function() end
+    MainMenuBarMaxLevelBar:SetAlpha(0)
   end
 
   for i = 1, 10 do
@@ -237,6 +270,10 @@ function actionbar:enable()
   local hookUIParent_ManageFramePositions = UIParent_ManageFramePositions
   UIParent_ManageFramePositions = function(a1, a2, a3)
     hookUIParent_ManageFramePositions(a1, a2, a3)
+    if ShapeshiftBarLeft then ShapeshiftBarLeft:Hide(); ShapeshiftBarLeft:SetAlpha(0) end
+    if ShapeshiftBarMiddle then ShapeshiftBarMiddle:Hide(); ShapeshiftBarMiddle:SetAlpha(0) end
+    if ShapeshiftBarRight then ShapeshiftBarRight:Hide(); ShapeshiftBarRight:SetAlpha(0) end
+    if MainMenuBarMaxLevelBar then MainMenuBarMaxLevelBar:Hide(); MainMenuBarMaxLevelBar:SetAlpha(0) end
     OzAb.actionbar:centerAndSize()
   end
 
