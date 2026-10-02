@@ -5,9 +5,7 @@
 ## Notes-zhCN: 动作条居中、去除狮鹫、距离染色、触发高亮及自适应布局
 ## Author: Oz
 ## Version: 1.0.0
-## SavedVariables: OzActionbarDB
 
-lib\lib.lua
 lib\libhook.lua
 OzActionbar.lua
 actionbar.lua

@@ -6,6 +6,7 @@ local actionbar = {
   barPadding = 6,
   normalButtonSize = 36,
   smallButtonSize = 30,
+  activeCooldowns = {},
   barList = {
     { name = "Action",              count = 12 },
     { name = "BonusAction",         count = 12 },
@@ -19,12 +20,128 @@ local actionbar = {
 }
 OzAb.actionbar = actionbar
 
-function actionbar:restyle()
+function actionbar:updateButtonCooldown(btn, start, duration)
+  local rem = (start + duration) - GetTime()
+  if rem <= 0 then
+    btn.ozCdText:SetText("")
+    return false
+  end
+
+  if rem < 100 then
+    local s = math.ceil(rem)
+    if s >= 100 then s = 99 end
+    btn.ozCdText:SetText(s)
+    btn.ozCdText:SetTextColor(1, 0.82, 0)
+  else
+    local m = math.ceil(rem / 60)
+    btn.ozCdText:SetText(m .. "m")
+    btn.ozCdText:SetTextColor(1, 1, 1)
+  end
+  return true
+end
+
+function actionbar:setupCooldowns()
+  local cdTimer = CreateFrame("Frame")
+  cdTimer:Hide()
+  local updateInterval = 0
+
+  cdTimer:SetScript("OnUpdate", function()
+    local dt = arg1 or 0.05
+    updateInterval = updateInterval + dt
+    if updateInterval < 0.05 then return end
+    updateInterval = 0
+
+    local hasActive = false
+    for btn, data in pairs(actionbar.activeCooldowns) do
+      if actionbar:updateButtonCooldown(btn, data.start, data.duration) then
+        hasActive = true
+      else
+        actionbar.activeCooldowns[btn] = nil
+      end
+    end
+
+    if not hasActive then
+      cdTimer:Hide()
+    end
+  end)
+  self.cooldownTimerFrame = cdTimer
+
+  if OzHook and OzHook.hook then
+    OzHook:hook("CooldownFrame_SetTimer", nil, function(cooldown, start, duration, enable)
+      if not cooldown then return end
+      local btn = cooldown:GetParent()
+      if not btn or not btn.ozCdText then return end
+
+      if start and duration and start > 0 and duration > 1.5 and enable and enable > 0 then
+        actionbar.activeCooldowns[btn] = { start = start, duration = duration }
+        actionbar.cooldownTimerFrame:Show()
+        actionbar:updateButtonCooldown(btn, start, duration)
+      else
+        if actionbar.activeCooldowns[btn] then
+          actionbar.activeCooldowns[btn] = nil
+          btn.ozCdText:SetText("")
+        end
+      end
+    end)
+  end
+end
+
+function actionbar:initButtons()
   for _, bar in ipairs(self.barList) do
+    local isSmall = (bar.name == "PetAction")
+    local isShapeshift = (bar.name == "Shapeshift")
+    local isAction = (bar.name == "Action" or bar.name == "BonusAction" or string.sub(bar.name, 1, 8) == "MultiBar")
     for i = 1, bar.count do
-      local texture = _G[bar.name .. "Button" .. i .. "NormalTexture"]
-      if texture and texture.SetPoint then
-        texture:SetPoint("CENTER", 0, 0)
+      local btnName = bar.name .. "Button" .. i
+      local btn = _G[btnName]
+      if btn then
+        -- 1. Restyle normal texture
+        local normTex = _G[btnName .. "NormalTexture"]
+        if normTex and normTex.SetPoint then
+          normTex:SetPoint("CENTER", 0, 0)
+        end
+
+        -- 2. Clear shapeshift button border texture
+        if isShapeshift and btn.SetNormalTexture then
+          btn:SetNormalTexture("")
+        end
+
+        -- 3. Create cooldown text
+        if not btn.ozCdText then
+          local cd = _G[btnName .. "Cooldown"]
+          local cdFrame = CreateFrame("Frame", nil, btn)
+          cdFrame:SetAllPoints(btn)
+          cdFrame:EnableMouse(false)
+          local baseLevel = cd and cd:GetFrameLevel() or btn:GetFrameLevel()
+          cdFrame:SetFrameLevel(baseLevel + 5)
+
+          local cdText = cdFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+          cdText:SetFont(STANDARD_TEXT_FONT, isSmall and 12 or 14, "OUTLINE")
+          cdText:SetPoint("CENTER", cdFrame, "CENTER", 0, 0)
+          cdText:SetJustifyH("CENTER")
+          btn.ozCdText = cdText
+
+          -- 4. Check initial cooldown if button is already on cooldown
+          local start, duration, enable
+          if isAction then
+            local action = ActionButton_GetPagedID and ActionButton_GetPagedID(btn) or btn.action
+            if action and HasAction(action) then
+              start, duration, enable = GetActionCooldown(action)
+            end
+          elseif isSmall and GetPetActionCooldown then
+            start, duration, enable = GetPetActionCooldown(i)
+          elseif isShapeshift and GetShapeshiftFormCooldown then
+            start, duration, enable = GetShapeshiftFormCooldown(i)
+          end
+
+          if start and duration and start > 0 and duration > 1.5 and enable and enable > 0 then
+            self.activeCooldowns[btn] = { start = start, duration = duration }
+            if self.cooldownTimerFrame then
+              self.cooldownTimerFrame:Show()
+            end
+            self:updateButtonCooldown(btn, start, duration)
+          end
+        end
       end
     end
   end
@@ -67,16 +184,6 @@ function actionbar:layoutButtons()
         end
       end
     end
-  end
-end
-
-function actionbar:resize()
-  local totalWidth = 12 * self.normalButtonSize + 11 * self.buttonPadding
-  if MainMenuBar then MainMenuBar:SetWidth(totalWidth) end
-  if MainMenuBarMaxLevelBar then
-    MainMenuBarMaxLevelBar:Hide()
-    MainMenuBarMaxLevelBar.Show = function() end
-    MainMenuBarMaxLevelBar:SetAlpha(0)
   end
 end
 
@@ -204,13 +311,6 @@ function actionbar:removeTextures()
     MainMenuBarMaxLevelBar.Show = function() end
     MainMenuBarMaxLevelBar:SetAlpha(0)
   end
-
-  for i = 1, 10 do
-    local btn = _G["ShapeshiftButton" .. i]
-    if btn and btn.SetNormalTexture then
-      btn:SetNormalTexture("")
-    end
-  end
 end
 
 function actionbar:hideWidget()
@@ -261,43 +361,27 @@ end
 function actionbar:enable()
   self:removeTextures()
   self:hideWidget()
-  self:restyle()
-  self:resize()
+  self:setupCooldowns()
+  self:initButtons()
   PetActionBarFrame:SetScript("OnUpdate", nil)
   self:centerAndSize()
   self:coloringButton()
 
-  local hookUIParent_ManageFramePositions = UIParent_ManageFramePositions
-  UIParent_ManageFramePositions = function(a1, a2, a3)
-    hookUIParent_ManageFramePositions(a1, a2, a3)
-    if ShapeshiftBarLeft then ShapeshiftBarLeft:Hide(); ShapeshiftBarLeft:SetAlpha(0) end
-    if ShapeshiftBarMiddle then ShapeshiftBarMiddle:Hide(); ShapeshiftBarMiddle:SetAlpha(0) end
-    if ShapeshiftBarRight then ShapeshiftBarRight:Hide(); ShapeshiftBarRight:SetAlpha(0) end
-    if MainMenuBarMaxLevelBar then MainMenuBarMaxLevelBar:Hide(); MainMenuBarMaxLevelBar:SetAlpha(0) end
-    OzAb.actionbar:centerAndSize()
-  end
-
-  if ShapeshiftBar_Update then
-    local hook = ShapeshiftBar_Update
-    ShapeshiftBar_Update = function()
-      hook()
+  if OzHook and OzHook.hook then
+    OzHook:hook("UIParent_ManageFramePositions", nil, function()
       OzAb.actionbar:centerAndSize()
-    end
-  end
+    end)
 
-  if ShowBonusActionBar then
-    local hook = ShowBonusActionBar
-    ShowBonusActionBar = function()
-      hook()
+    OzHook:hook("ShapeshiftBar_Update", nil, function()
+      OzAb.actionbar:centerAndSize()
+    end)
+
+    OzHook:hook("ShowBonusActionBar", nil, function()
       OzAb.actionbar:layoutButtons()
-    end
-  end
+    end)
 
-  if ShowPetActionBar then
-    local hook = ShowPetActionBar
-    ShowPetActionBar = function()
-      hook()
+    OzHook:hook("ShowPetActionBar", nil, function()
       OzAb.actionbar:centerAndSize()
-    end
+    end)
   end
 end
